@@ -25,7 +25,9 @@ struct MazeState {
 }
 
 impl MazeState {
+    #[allow(non_upper_case_globals)]
     const dx: [i32; 4] = [1, -1, 0, 0];
+    #[allow(non_upper_case_globals)]
     const dy: [i32; 4] = [0, 0, 1, -1];
     pub fn new() -> MazeState {
         let mut rng = rand::thread_rng();
@@ -55,28 +57,65 @@ impl MazeState {
         self.turn == END_TURN
     }
 
-    fn legal_action(&self) -> Vec<i32> {
+    fn legal_action(&self) -> Vec<usize> {
         let mut actions = Vec::new();
         for i in 0..4 {
             let nx = self.character.x + Self::dx[i];
             let ny = self.character.y + Self::dy[i];
+            if nx < 0 || nx >= W || ny < 0 || ny >= H {
+                continue;
+            }
+            actions.push(i);
         }
 
         actions
     }
 
     fn advance(&mut self, action: usize) {
-        let nx = self.character.x + Self::dx[action];
-        let ny = self.character.y + Self::dy[action];
-        let point = &mut self.points[nx as usize][ny as usize];
+        self.character.x += Self::dx[action];
+        self.character.y += Self::dy[action];
+        let point = &mut self.points[self.character.x as usize][self.character.y as usize];
         if *point > 0 {
             self.game_score += *point;
             *point = 0;
         }
         self.turn += 1;
     }
+
+    fn to_string(&self) {
+        println!("turn: {}", self.turn);
+        println!("score: {}", self.game_score);
+        for i in 0..W {
+            for j in 0..H {
+                if i == self.character.x && j == self.character.y {
+                    print!("@");
+                } else if self.points[i as usize][j as usize] > 0 {
+                    print!("{}", self.points[i as usize][j as usize]);
+                } else {
+                    print!(".");
+                }
+            }
+            println!();
+        }
+        println!();
+    }
+}
+
+fn random_action(state: &MazeState) -> usize {
+    let mut rng = rand::thread_rng();
+    let act = state.legal_action();
+    return act[rng.gen_range(0..act.len())];
+}
+
+fn play_game() {
+    let mut state = MazeState::new();
+    state.to_string();
+    while !state.is_done() {
+        state.advance(random_action(&state));
+        state.to_string();
+    }
 }
 
 fn main() {
-    println!("Hello, world!");
+    play_game();
 }

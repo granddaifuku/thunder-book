@@ -4,7 +4,7 @@ const H: i32 = 4;
 const W: i32 = 3;
 const END_TURN: i32 = 4;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Coord {
     x: i32,
     y: i32,
@@ -16,12 +16,13 @@ impl Coord {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct MazeState {
     points: Vec<Vec<i32>>,
     turn: i32,
     character: Coord,
     game_score: i32,
+    evaluated_score: i32,
 }
 
 impl MazeState {
@@ -50,6 +51,7 @@ impl MazeState {
             turn: 0,
             character,
             game_score: 0,
+            evaluated_score: 0,
         }
     }
 
@@ -82,6 +84,10 @@ impl MazeState {
         self.turn += 1;
     }
 
+    fn evaluate_score(&mut self) {
+        self.evaluated_score = self.game_score;
+    }
+
     fn to_string(&self) {
         println!("turn: {}", self.turn);
         println!("score: {}", self.game_score);
@@ -101,21 +107,50 @@ impl MazeState {
     }
 }
 
+#[allow(dead_code)]
 fn random_action(state: &MazeState) -> usize {
     let mut rng = rand::thread_rng();
-    let act = state.legal_action();
-    return act[rng.gen_range(0..act.len())];
+    let acts = state.legal_action();
+    return acts[rng.gen_range(0..acts.len())];
 }
 
-fn play_game() {
+#[allow(dead_code)]
+fn greedy_action(state: &MazeState) -> usize {
+    let acts = state.legal_action();
+    let mut best_action = -1 as i32;
+    let mut best_score = -1e9 as i32;
+    for act in acts {
+        let mut now = state.clone();
+        now.advance(act);
+        now.evaluate_score();
+        if now.evaluated_score > best_score {
+            best_score = now.evaluated_score;
+            best_action = act as i32;
+        }
+    }
+
+    best_action as usize
+}
+
+fn play_game() -> i32 {
     let mut state = MazeState::new();
     state.to_string();
     while !state.is_done() {
-        state.advance(random_action(&state));
+        state.advance(greedy_action(&state));
         state.to_string();
     }
+    state.game_score
+}
+
+fn test_ai_score(game_number: usize) {
+    let mut score_mean = 0.0;
+    for _ in 0..game_number {
+        score_mean += play_game() as f64;
+    }
+    score_mean /= game_number as f64;
+    println!("Score: {:.2}", score_mean);
 }
 
 fn main() {
-    play_game();
+    test_ai_score(100);
 }

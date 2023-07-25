@@ -1,10 +1,32 @@
 use rand::Rng;
 
-const H: i32 = 4;
-const W: i32 = 3;
-const END_TURN: i32 = 4;
+use std::cmp::Ordering;
+use std::collections::BinaryHeap;
+use std::time::Instant;
 
-#[derive(Debug, Clone)]
+const H: i32 = 30;
+const W: i32 = 30;
+const END_TURN: i32 = 100;
+
+struct TimeKeeper {
+    start_time: Instant,
+    threshold: u128,
+}
+
+impl TimeKeeper {
+    pub fn new(threshold: u128) -> TimeKeeper {
+        TimeKeeper {
+            start_time: Instant::now(),
+            threshold,
+        }
+    }
+
+    pub fn is_time_over(&self) -> bool {
+        (Instant::now() - self.start_time).as_millis() >= self.threshold
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
 struct Coord {
     x: i32,
     y: i32,
@@ -16,13 +38,28 @@ impl Coord {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 struct MazeState {
     points: Vec<Vec<i32>>,
     turn: i32,
     character: Coord,
     game_score: i32,
     evaluated_score: i32,
+    first_action: usize,
+}
+
+impl Ord for MazeState {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.evaluated_score
+            .cmp(&other.evaluated_score)
+            .then_with(|| self.turn.cmp(&other.turn))
+    }
+}
+
+impl PartialOrd for MazeState {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 impl MazeState {
@@ -52,6 +89,7 @@ impl MazeState {
             character,
             game_score: 0,
             evaluated_score: 0,
+            first_action: 0,
         }
     }
 
@@ -64,7 +102,7 @@ impl MazeState {
         for i in 0..4 {
             let nx = self.character.x + Self::dx[i];
             let ny = self.character.y + Self::dy[i];
-            if nx < 0 || nx >= W || ny < 0 || ny >= H {
+            if !(0..W).contains(&nx) || !(0..H).contains(&ny) {
                 continue;
             }
             actions.push(i);
@@ -88,6 +126,7 @@ impl MazeState {
         self.evaluated_score = self.game_score;
     }
 
+    #[allow(dead_code)]
     fn to_string(&self) {
         println!("turn: {}", self.turn);
         println!("score: {}", self.game_score);
@@ -111,13 +150,14 @@ impl MazeState {
 fn random_action(state: &MazeState) -> usize {
     let mut rng = rand::thread_rng();
     let acts = state.legal_action();
-    return acts[rng.gen_range(0..acts.len())];
+
+    acts[rng.gen_range(0..acts.len())]
 }
 
 #[allow(dead_code)]
 fn greedy_action(state: &MazeState) -> usize {
     let acts = state.legal_action();
-    let mut best_action = -1 as i32;
+    let mut best_action = -1_i32;
     let mut best_score = -1e9 as i32;
     for act in acts {
         let mut now = state.clone();
@@ -132,12 +172,56 @@ fn greedy_action(state: &MazeState) -> usize {
     best_action as usize
 }
 
+#[allow(dead_code)]
+fn beam_search_action(state: &MazeState, beam_width: i32, threshold: u128) -> usize {
+    let mut now_beam = BinaryHeap::new();
+    let mut best_state = state.clone();
+    let time_keeper = TimeKeeper::new(threshold);
+    let mut t = true;
+
+    now_beam.push(state.clone());
+    loop {
+        let mut next_beam = BinaryHeap::new();
+        for _ in 0..beam_width {
+            if time_keeper.is_time_over() {
+                return best_state.first_action;
+            }
+
+            if now_beam.is_empty() {
+                break;
+            }
+
+            let now_state = now_beam.pop().unwrap();
+            let legal_actions = now_state.legal_action();
+            for act in legal_actions {
+                let mut next_state = now_state.clone();
+                next_state.advance(act);
+                next_state.evaluate_score();
+                if t {
+                    next_state.first_action = act;
+                }
+                next_beam.push(next_state);
+            }
+            t = false;
+        }
+
+        now_beam = next_beam;
+        best_state = now_beam.peek().unwrap().clone();
+
+        if best_state.is_done() {
+            break;
+        }
+    }
+
+    best_state.first_action
+}
+
 fn play_game() -> i32 {
     let mut state = MazeState::new();
-    state.to_string();
+    // state.to_string();
     while !state.is_done() {
-        state.advance(greedy_action(&state));
-        state.to_string();
+        state.advance(beam_search_action(&state, 5, 1000));
+        // state.to_string();
     }
     state.game_score
 }

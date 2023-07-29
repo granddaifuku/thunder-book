@@ -216,11 +216,61 @@ fn beam_search_action(state: &MazeState, beam_width: i32, threshold: u128) -> us
     best_state.first_action
 }
 
+#[allow(dead_code)]
+fn chokudai_search_action(
+    state: &MazeState,
+    beam_width: usize,
+    beam_depth: usize,
+    threshold: u128,
+) -> usize {
+    let time_keeper = TimeKeeper::new(threshold);
+    let mut beam = vec![BinaryHeap::new(); beam_depth + 1];
+    beam[0].push(state.clone());
+    loop {
+        for t in 0..beam_depth {
+            let mut now_beam = beam.get(t).unwrap().clone();
+
+            for _ in 0..beam_width {
+                if now_beam.is_empty() {
+                    break;
+                }
+                let now_state = now_beam.peek().unwrap().clone();
+                if now_state.is_done() {
+                    break;
+                }
+                now_beam.pop();
+                let legal_actions = now_state.legal_action();
+                for act in legal_actions {
+                    let mut next_state = now_state.clone();
+                    next_state.advance(act);
+                    next_state.evaluate_score();
+                    if t == 0 {
+                        next_state.first_action = act;
+                    }
+                    beam[t + 1].push(next_state);
+                }
+            }
+            beam[t] = now_beam;
+        }
+        if time_keeper.is_time_over() {
+            break;
+        }
+    }
+    for t in (0..beam_depth + 1).rev() {
+        let now_beam = beam.get(t).unwrap();
+        if !now_beam.is_empty() {
+            return now_beam.peek().unwrap().first_action;
+        }
+    }
+
+    0
+}
+
 fn play_game() -> i32 {
     let mut state = MazeState::new();
     // state.to_string();
     while !state.is_done() {
-        state.advance(beam_search_action(&state, 5, 1000));
+        state.advance(chokudai_search_action(&state, 1, END_TURN as usize, 1));
         // state.to_string();
     }
     state.game_score

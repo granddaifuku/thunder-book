@@ -1,11 +1,16 @@
+use once_cell::sync::Lazy;
 use rand::{self, Rng};
+use std::sync::Mutex;
 
 const H: usize = 5;
 const W: usize = 5;
 const END_TURN: usize = 5;
 const CHARACTER_N: usize = 3;
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+static RNG: Lazy<Mutex<rand::rngs::StdRng>> =
+    Lazy::new(|| Mutex::new(rand::SeedableRng::seed_from_u64(100)));
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 struct Coord {
     x: i32,
     y: i32,
@@ -17,7 +22,7 @@ impl Coord {
     }
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 struct AutoMoveMazeState {
     points: Vec<Vec<i32>>,
     turn: usize,
@@ -32,12 +37,11 @@ impl AutoMoveMazeState {
     #[allow(non_upper_case_globals)]
     const dy: [i32; 4] = [0, 0, 1, -1];
 
-    fn new(seed: u64) -> AutoMoveMazeState {
-        let mut rng: rand::rngs::StdRng = rand::SeedableRng::seed_from_u64(seed);
+    fn new() -> AutoMoveMazeState {
         let mut points = vec![vec![0; H]; W];
         for i in 0..W {
             for j in 0..H {
-                points[i][j] = rng.gen_range(0..10);
+                points[i][j] = RNG.lock().unwrap().gen_range(0..10);
             }
         }
 
@@ -92,19 +96,33 @@ impl AutoMoveMazeState {
     }
 
     fn get_score(&mut self, is_print: bool) -> i64 {
-        for character in &self.characters {
-            let point = &mut self.points[character.x as usize][character.y as usize];
+        let mut tmp_state = self.clone();
+        for character in &tmp_state.characters {
+            let point = &mut tmp_state.points[character.x as usize][character.y as usize];
             *point = 0;
         }
 
-        while !self.is_done() {
-            self.advance();
+        while !tmp_state.is_done() {
+            tmp_state.advance();
             if is_print {
-                self.to_string();
+                tmp_state.to_string();
             }
         }
 
-        self.game_score
+        tmp_state.game_score
+    }
+
+    fn init(&mut self) {
+        for character in &mut self.characters {
+            character.x = RNG.lock().unwrap().gen_range(0..W) as i32;
+            character.y = RNG.lock().unwrap().gen_range(0..H) as i32;
+        }
+    }
+
+    fn transition(&mut self) {
+        let character = &mut self.characters[RNG.lock().unwrap().gen_range(0..CHARACTER_N)];
+        character.x = RNG.lock().unwrap().gen_range(0..W) as i32;
+        character.y = RNG.lock().unwrap().gen_range(0..H) as i32;
     }
 
     #[allow(dead_code)]
@@ -137,22 +155,36 @@ impl AutoMoveMazeState {
 }
 
 #[allow(dead_code)]
-fn random_action(state: &mut AutoMoveMazeState, seed: u64) {
-    let mut rng: rand::rngs::StdRng = rand::SeedableRng::seed_from_u64(seed);
+fn random_action(state: &mut AutoMoveMazeState) {
     for character_id in 0..CHARACTER_N {
-        let x = rng.gen_range(0..W) as i32;
-        let y = rng.gen_range(0..H) as i32;
+        let x = RNG.lock().unwrap().gen_range(0..W) as i32;
+        let y = RNG.lock().unwrap().gen_range(0..H) as i32;
         state.set_character(character_id, x, y);
     }
 }
 
-fn play_game(seed: u64) {
-    let mut state = AutoMoveMazeState::new(seed);
-    random_action(&mut state, seed);
-    state.to_string();
-    println!("Score of random action : {}", state.get_score(true));
+#[allow(dead_code)]
+fn hill_climb(state: &mut AutoMoveMazeState, number: usize) {
+    state.init();
+    let mut best_score = state.get_score(false);
+    for _ in 0..number {
+        let mut next_state = state.clone();
+        next_state.transition();
+        let next_score = next_state.get_score(false);
+        if next_score > best_score {
+            best_score = next_score;
+            *state = next_state;
+        }
+    }
+}
+
+fn play_game() {
+    let mut state = AutoMoveMazeState::new();
+    // random_action(&mut state);
+    hill_climb(&mut state, 10000);
+    println!("Score of hill climb : {}", state.get_score(false));
 }
 
 fn main() {
-    play_game(0);
+    play_game();
 }

@@ -178,6 +178,39 @@ fn hill_climb(state: &mut AutoMoveMazeState, number: usize) {
     }
 }
 
+#[allow(dead_code)]
+fn simulated_annealing(
+    state: &mut AutoMoveMazeState,
+    number: usize,
+    start_temp: f64,
+    end_temp: f64,
+) -> AutoMoveMazeState {
+    state.init();
+    let mut best_score = state.get_score(false);
+    let mut now_score = best_score;
+    let mut best_state = state.clone();
+    for i in 0..number {
+        let mut next_state = state.clone();
+        next_state.transition();
+        let next_score = next_state.get_score(false);
+        let temp = start_temp + (end_temp - start_temp) * (i as f64 / number as f64);
+        let prob = f64::exp((next_score - now_score) as f64 / temp);
+        let is_force_next =
+            prob > RNG.lock().unwrap().gen_range(0..usize::MAX) as f64 / usize::MAX as f64;
+        if next_score > now_score || is_force_next {
+            now_score = next_score;
+            *state = next_state.clone();
+        }
+
+        if next_score > best_score {
+            best_score = next_score;
+            best_state = next_state;
+        }
+    }
+    best_state
+}
+
+#[allow(dead_code)]
 fn play_game() {
     let mut state = AutoMoveMazeState::new();
     // random_action(&mut state);
@@ -185,6 +218,34 @@ fn play_game() {
     println!("Score of hill climb : {}", state.get_score(false));
 }
 
+fn test_ai_score(game_number: usize) {
+    let simulate_number = 10000;
+    let mut hill_climb_score_mean = 0;
+    let mut annealing_score_mean = 0;
+    for _ in 0..game_number {
+        let mut hill_climb_state = AutoMoveMazeState::new();
+        let mut annealing_state = hill_climb_state.clone();
+        hill_climb(&mut hill_climb_state, simulate_number);
+        hill_climb_score_mean += hill_climb_state.get_score(false);
+        annealing_state = simulated_annealing(
+            &mut annealing_state,
+            simulate_number,
+            f64::from(500),
+            f64::from(10),
+        );
+        annealing_score_mean += annealing_state.get_score(false);
+    }
+
+    println!(
+        "Score of hill climb: {}",
+        hill_climb_score_mean as f64 / game_number as f64
+    );
+    println!(
+        "Score of annealing : {}",
+        annealing_score_mean as f64 / game_number as f64
+    );
+}
+
 fn main() {
-    play_game();
+    test_ai_score(1000);
 }

@@ -1,11 +1,14 @@
 use std::{cmp::Ordering, sync::Mutex};
 
+use minimax::minimax_action;
 use once_cell::sync::Lazy;
 use rand::Rng;
 
 const H: usize = 3;
 const W: usize = 3;
 const END_TURN: usize = 4;
+
+struct Ai(String, Box<dyn Fn(&AlternateMazeState) -> usize>);
 
 static RNG: Lazy<Mutex<rand::rngs::StdRng>> =
     Lazy::new(|| Mutex::new(rand::SeedableRng::seed_from_u64(0)));
@@ -22,11 +25,11 @@ enum WinningStatus {
     None,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Character {
     x: i32,
     y: i32,
-    game_score: usize,
+    game_score: i32,
 }
 
 impl Character {
@@ -39,31 +42,32 @@ impl Character {
     }
 }
 
-#[derive(Debug)]
-struct AlternamteMazeState {
+#[derive(Debug, Clone)]
+pub struct AlternateMazeState {
     points: Vec<Vec<usize>>,
     turn: usize,
     characters: Vec<Character>,
 }
 
-impl AlternamteMazeState {
+impl AlternateMazeState {
     #[allow(non_upper_case_globals)]
     const dx: [i32; 4] = [1, -1, 0, 0];
     #[allow(non_upper_case_globals)]
     const dy: [i32; 4] = [0, 0, 1, -1];
 
-    fn new() -> AlternamteMazeState {
+    fn new(seed: u64) -> AlternateMazeState {
+        let mut rng: rand::rngs::StdRng = rand::SeedableRng::seed_from_u64(seed);
         let mut points = vec![vec![0; W]; H];
         for i in 0..H {
             for j in 0..W {
                 if i == H / 2 && (j == W / 2 - 1 || j == W / 2 + 1) {
                     continue;
                 }
-                points[i][j] = get_random(10);
+                points[i][j] = rng.gen_range(0..10);
             }
         }
 
-        AlternamteMazeState {
+        AlternateMazeState {
             points,
             turn: 0,
             characters: vec![
@@ -71,6 +75,10 @@ impl AlternamteMazeState {
                 Character::new(H as i32 / 2, W as i32 / 2 + 1),
             ],
         }
+    }
+
+    const fn is_first_player(&self) -> bool {
+        self.turn % 2 == 0
     }
 
     const fn is_done(&self) -> bool {
@@ -84,7 +92,7 @@ impl AlternamteMazeState {
 
         let point = &mut self.points[character.x as usize][character.y as usize];
         if *point > 0 {
-            character.game_score += *point;
+            character.game_score += *point as i32;
             *point = 0;
         }
         self.turn += 1;
@@ -116,6 +124,30 @@ impl AlternamteMazeState {
             }
         } else {
             WinningStatus::None
+        }
+    }
+
+    fn get_score(&self) -> i32 {
+        self.characters[0].game_score - self.characters[1].game_score
+    }
+
+    fn get_first_player_score_for_winning_rate(&self) -> f32 {
+        match self.get_winning_status() {
+            WinningStatus::Win => {
+                if self.is_first_player() {
+                    1.0
+                } else {
+                    0.0
+                }
+            }
+            WinningStatus::Lose => {
+                if self.is_first_player() {
+                    0.0
+                } else {
+                    1.0
+                }
+            }
+            _ => 0.5,
         }
     }
 
@@ -167,20 +199,58 @@ impl AlternamteMazeState {
 }
 
 #[allow(dead_code)]
-fn random_action(state: &AlternamteMazeState) -> usize {
+fn random_action(state: &AlternateMazeState) -> usize {
     let legal_actions = state.legal_actions();
 
     legal_actions[get_random(legal_actions.len())]
 }
 
+fn test_first_player_win_rate(ais: Vec<Ai>, game_number: usize) {
+    let mut first_player_win_rate = 0.0;
+    for i in 0..game_number {
+        let base_state = AlternateMazeState::new(i as u64);
+        for j in 0..2 {
+            let mut state = base_state.clone();
+            let first_ai = &ais[j];
+            let second_ai = &ais[(j + 1) % 2];
+            loop {
+                state.advance(first_ai.1(&state));
+                if state.is_done() {
+                    break;
+                }
+                state.advance(second_ai.1(&state));
+                if state.is_done() {
+                    break;
+                }
+            }
+            let mut win_rate_point = state.get_first_player_score_for_winning_rate();
+            if j == 1 {
+                win_rate_point = 1.0 - win_rate_point;
+            }
+            if win_rate_point >= 0.0 {
+                state.to_string();
+            }
+            first_player_win_rate += win_rate_point;
+        }
+        println!("i {} w {}", i, first_player_win_rate / ((i + 1) * 2) as f32);
+    }
+    first_player_win_rate /= (game_number * 2) as f32;
+
+    println!(
+        "Winning rate of {} to {} : {}",
+        &ais[0].0, &ais[1].0, first_player_win_rate
+    );
+}
+
+#[allow(dead_code)]
 fn play_game() {
-    let mut state = AlternamteMazeState::new();
+    let mut state = AlternateMazeState::new(1);
     state.to_string();
     while !state.is_done() {
         // Player 1
         {
             println!("Player 1 -----------------------");
-            let act = random_action(&state);
+            let act = minimax::minimax_action(&state, END_TURN) as usize;
             println!("action: {}", act);
             state.advance(act);
             state.to_string();
@@ -212,6 +282,54 @@ fn play_game() {
     }
 }
 
+mod minimax {
+    use super::*;
+    fn minimax_score(state: &AlternateMazeState, depth: usize) -> i32 {
+        if state.is_done() || depth == 0 {
+            return state.get_score();
+        }
+        let legal_actions = state.legal_actions();
+        if legal_actions.is_empty() {
+            return state.get_score();
+        }
+
+        let mut best_score = i32::MIN;
+        for act in legal_actions {
+            let mut next_state = state.clone();
+            next_state.advance(act);
+            let score = -minimax_score(&next_state, depth - 1);
+            if score > best_score {
+                best_score = score;
+            }
+        }
+
+        best_score
+    }
+
+    pub fn minimax_action(state: &AlternateMazeState, depth: usize) -> i32 {
+        let mut best_action = -1;
+        let mut best_score = i32::MIN;
+        for act in state.legal_actions() {
+            let mut next_state = state.clone();
+            next_state.advance(act);
+            let score = -minimax_score(&next_state, depth);
+            if score > best_score {
+                best_action = act as i32;
+                best_score = score;
+            }
+        }
+
+        best_action
+    }
+}
+
 fn main() {
-    play_game();
+    let ais = vec![
+        Ai(
+            String::from("MiniMaxAction"),
+            Box::new(|state| minimax_action(state, END_TURN) as usize),
+        ),
+        Ai(String::from("RnadomAction"), Box::new(random_action)),
+    ];
+    test_first_player_win_rate(ais, 100);
 }

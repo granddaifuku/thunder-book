@@ -1,12 +1,13 @@
 use std::{cmp::Ordering, sync::Mutex};
 
+use alphabeta::alphabeta_action;
 use minimax::minimax_action;
 use once_cell::sync::Lazy;
 use rand::Rng;
 
 const H: usize = 3;
 const W: usize = 3;
-const END_TURN: usize = 4;
+const END_TURN: usize = 10;
 
 struct Ai(String, Box<dyn Fn(&AlternateMazeState) -> usize>);
 
@@ -205,6 +206,38 @@ fn random_action(state: &AlternateMazeState) -> usize {
     legal_actions[get_random(legal_actions.len())]
 }
 
+fn get_sample_states(game_number: usize) -> Vec<AlternateMazeState> {
+    let mut rng: rand::rngs::StdRng = rand::SeedableRng::seed_from_u64(0);
+    let mut states = Vec::new();
+    for _ in 0..game_number {
+        let mut state = AlternateMazeState::new(rng.gen());
+        let turn = rng.gen::<usize>() % END_TURN;
+        for _ in 0..turn {
+            state.advance(random_action(&state));
+        }
+        states.push(state);
+    }
+
+    states
+}
+
+fn calc_execution_speed(ai: &Ai, states: &Vec<AlternateMazeState>) {
+    use std::time;
+
+    let start_time = time::Instant::now();
+    for state in states {
+        ai.1(state);
+    }
+    let diff = time::Instant::now() - start_time;
+    println!(
+        "{} take {} ms to process {} nodes",
+        ai.0,
+        diff.as_millis(),
+        states.len()
+    );
+}
+
+#[allow(dead_code)]
 fn test_first_player_win_rate(ais: Vec<Ai>, game_number: usize) {
     let mut first_player_win_rate = 0.0;
     for i in 0..game_number {
@@ -323,13 +356,61 @@ mod minimax {
     }
 }
 
+mod alphabeta {
+    use super::*;
+    fn alphabeta_score(state: &AlternateMazeState, mut alpha: i32, beta: i32, depth: usize) -> i32 {
+        if state.is_done() || depth == 0 {
+            return state.get_score();
+        }
+        let legal_actions = state.legal_actions();
+        if legal_actions.is_empty() {
+            return state.get_score();
+        }
+        for act in legal_actions {
+            let mut next_state = state.clone();
+            next_state.advance(act);
+            let score = -alphabeta_score(&next_state, -beta, -alpha, depth - 1);
+            if score > alpha {
+                alpha = score;
+            }
+            if alpha >= beta {
+                return alpha;
+            }
+        }
+        alpha
+    }
+
+    pub fn alphabeta_action(state: &AlternateMazeState, depth: usize) -> i32 {
+        let mut best_action = -1;
+        let mut alpha = -100000007;
+        let beta = 100000007;
+        for act in state.legal_actions() {
+            let mut next_state = state.clone();
+            next_state.advance(act);
+            let score = -alphabeta_score(&next_state, -beta, -alpha, depth);
+            if score > alpha {
+                best_action = act as i32;
+                alpha = score;
+            }
+        }
+        best_action
+    }
+}
+
 fn main() {
-    let ais = vec![
-        Ai(
+    let states = get_sample_states(100);
+    calc_execution_speed(
+        &Ai(
+            String::from("AlphaBetaAction"),
+            Box::new(|state| alphabeta_action(state, END_TURN) as usize),
+        ),
+        &states,
+    );
+    calc_execution_speed(
+        &Ai(
             String::from("MiniMaxAction"),
             Box::new(|state| minimax_action(state, END_TURN) as usize),
         ),
-        Ai(String::from("RnadomAction"), Box::new(random_action)),
-    ];
-    test_first_player_win_rate(ais, 100);
+        &states,
+    );
 }

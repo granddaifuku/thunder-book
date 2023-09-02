@@ -1,13 +1,32 @@
-use std::{cmp::Ordering, sync::Mutex};
+use std::cmp::Ordering;
+use std::sync::Mutex;
+use std::time::Instant;
 
-use alphabeta::alphabeta_action;
-use minimax::minimax_action;
+use iterative_deepning::iterative_deepning_action;
 use once_cell::sync::Lazy;
 use rand::Rng;
 
-const H: usize = 3;
-const W: usize = 3;
+const H: usize = 5;
+const W: usize = 5;
 const END_TURN: usize = 10;
+
+struct TimeKeeper {
+    start_time: Instant,
+    threshold: u128,
+}
+
+impl TimeKeeper {
+    pub fn new(threshold: u128) -> TimeKeeper {
+        TimeKeeper {
+            start_time: Instant::now(),
+            threshold,
+        }
+    }
+
+    pub fn is_time_over(&self) -> bool {
+        (Instant::now() - self.start_time).as_millis() >= self.threshold
+    }
+}
 
 struct Ai(String, Box<dyn Fn(&AlternateMazeState) -> usize>);
 
@@ -206,6 +225,7 @@ fn random_action(state: &AlternateMazeState) -> usize {
     legal_actions[get_random(legal_actions.len())]
 }
 
+#[allow(dead_code)]
 fn get_sample_states(game_number: usize) -> Vec<AlternateMazeState> {
     let mut rng: rand::rngs::StdRng = rand::SeedableRng::seed_from_u64(0);
     let mut states = Vec::new();
@@ -221,6 +241,7 @@ fn get_sample_states(game_number: usize) -> Vec<AlternateMazeState> {
     states
 }
 
+#[allow(dead_code)]
 fn calc_execution_speed(ai: &Ai, states: &Vec<AlternateMazeState>) {
     use std::time;
 
@@ -358,7 +379,12 @@ mod minimax {
 
 mod alphabeta {
     use super::*;
-    fn alphabeta_score(state: &AlternateMazeState, mut alpha: i32, beta: i32, depth: usize) -> i32 {
+    pub fn alphabeta_score(
+        state: &AlternateMazeState,
+        mut alpha: i32,
+        beta: i32,
+        depth: usize,
+    ) -> i32 {
         if state.is_done() || depth == 0 {
             return state.get_score();
         }
@@ -380,6 +406,7 @@ mod alphabeta {
         alpha
     }
 
+    #[allow(dead_code)]
     pub fn alphabeta_action(state: &AlternateMazeState, depth: usize) -> i32 {
         let mut best_action = -1;
         let mut alpha = -100000007;
@@ -397,20 +424,91 @@ mod alphabeta {
     }
 }
 
+mod iterative_deepning {
+    use super::{AlternateMazeState, TimeKeeper};
+    fn alphabeta_score(
+        state: &AlternateMazeState,
+        mut alpha: i32,
+        beta: i32,
+        depth: usize,
+        time_keeper: &TimeKeeper,
+    ) -> i32 {
+        if time_keeper.is_time_over() {
+            return 0;
+        }
+        if state.is_done() || depth == 0 {
+            return state.get_score();
+        }
+        let legal_actions = state.legal_actions();
+        if legal_actions.is_empty() {
+            return state.get_score();
+        }
+        for act in legal_actions {
+            let mut next_state = state.clone();
+            next_state.advance(act);
+            let score = -alphabeta_score(&next_state, -beta, -alpha, depth - 1, time_keeper);
+            if score > alpha {
+                alpha = score;
+            }
+            if alpha >= beta {
+                return alpha;
+            }
+            if time_keeper.is_time_over() {
+                return 0;
+            }
+        }
+        alpha
+    }
+
+    fn alpha_beta_action_with_time_threshold(
+        state: &AlternateMazeState,
+        depth: usize,
+        time_keeper: &TimeKeeper,
+    ) -> i32 {
+        let mut best_action = -1;
+        let mut alpha = -100000007;
+        let beta = 100000007;
+        for act in state.legal_actions() {
+            let mut next_state = state.clone();
+            next_state.advance(act);
+            let score = -alphabeta_score(&next_state, -beta, -alpha, depth, time_keeper);
+            if score > alpha {
+                best_action = act as i32;
+                alpha = score;
+            }
+            if time_keeper.is_time_over() {
+                return 0;
+            }
+        }
+        best_action
+    }
+
+    pub fn iterative_deepning_action(state: &AlternateMazeState, threshold: u128) -> i32 {
+        let time_keeper = TimeKeeper::new(threshold);
+        let mut best_action = -1;
+        let mut depth = 1;
+        loop {
+            let act = alpha_beta_action_with_time_threshold(state, depth, &time_keeper);
+            if time_keeper.is_time_over() {
+                break;
+            }
+            best_action = act;
+            depth += 1;
+        }
+        best_action
+    }
+}
+
 fn main() {
-    let states = get_sample_states(100);
-    calc_execution_speed(
-        &Ai(
-            String::from("AlphaBetaAction"),
-            Box::new(|state| alphabeta_action(state, END_TURN) as usize),
+    let ais = vec![
+        Ai(
+            String::from("IterativeDeepningAction 100"),
+            Box::new(|state| iterative_deepning_action(state, 100) as usize),
         ),
-        &states,
-    );
-    calc_execution_speed(
-        &Ai(
-            String::from("MiniMaxAction"),
-            Box::new(|state| minimax_action(state, END_TURN) as usize),
+        Ai(
+            String::from("IterativeDeepningAction 1"),
+            Box::new(|state| iterative_deepning_action(state, 1) as usize),
         ),
-        &states,
-    );
+    ];
+    test_first_player_win_rate(ais, 100);
 }

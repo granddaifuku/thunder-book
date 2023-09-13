@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 use std::sync::Mutex;
 use std::time::Instant;
 
-use iterative_deepning::iterative_deepning_action;
+use montecarlo::primitive_montecarlo_action;
 use once_cell::sync::Lazy;
 use rand::Rng;
 
@@ -10,11 +10,13 @@ const H: usize = 5;
 const W: usize = 5;
 const END_TURN: usize = 10;
 
+#[allow(dead_code)]
 struct TimeKeeper {
     start_time: Instant,
     threshold: u128,
 }
 
+#[allow(dead_code)]
 impl TimeKeeper {
     pub fn new(threshold: u128) -> TimeKeeper {
         TimeKeeper {
@@ -336,6 +338,7 @@ fn play_game() {
     }
 }
 
+#[allow(dead_code)]
 mod minimax {
     use super::*;
     fn minimax_score(state: &AlternateMazeState, depth: usize) -> i32 {
@@ -377,6 +380,7 @@ mod minimax {
     }
 }
 
+#[allow(dead_code)]
 mod alphabeta {
     use super::*;
     pub fn alphabeta_score(
@@ -406,7 +410,6 @@ mod alphabeta {
         alpha
     }
 
-    #[allow(dead_code)]
     pub fn alphabeta_action(state: &AlternateMazeState, depth: usize) -> i32 {
         let mut best_action = -1;
         let mut alpha = -100000007;
@@ -424,6 +427,7 @@ mod alphabeta {
     }
 }
 
+#[allow(dead_code)]
 mod iterative_deepning {
     use super::{AlternateMazeState, TimeKeeper};
     fn alphabeta_score(
@@ -499,15 +503,55 @@ mod iterative_deepning {
     }
 }
 
+mod montecarlo {
+    use super::{random_action, AlternateMazeState, WinningStatus};
+    pub fn primitive_montecarlo_action(state: &AlternateMazeState, playout_number: usize) -> usize {
+        let legal_actions = state.legal_actions();
+        let mut values = vec![0.0; legal_actions.len()];
+        let mut counts = vec![0; legal_actions.len()];
+        for count in 0..playout_number {
+            let index = count % legal_actions.len();
+            let mut next_state = state.clone();
+            next_state.advance(legal_actions[index]);
+            values[index] += 1.0 - playout(&mut next_state);
+            counts[index] += 1;
+        }
+
+        let mut best_action_index = -1;
+        let mut best_score = f32::MIN;
+        for index in 0..legal_actions.len() {
+            let value_mean = values[index] / counts[index] as f32;
+            if value_mean > best_score {
+                best_score = value_mean;
+                best_action_index = index as i32;
+            }
+        }
+
+        legal_actions[best_action_index as usize]
+    }
+
+    fn playout(state: &mut AlternateMazeState) -> f32 {
+        match state.get_winning_status() {
+            WinningStatus::Win => 1.0,
+            WinningStatus::Lose => 0.0,
+            WinningStatus::Draw => 0.5,
+            WinningStatus::None => {
+                state.advance(random_action(state));
+                1.0 - playout(state)
+            }
+        }
+    }
+}
+
 fn main() {
     let ais = vec![
         Ai(
-            String::from("IterativeDeepningAction 100"),
-            Box::new(|state| iterative_deepning_action(state, 100) as usize),
+            String::from("PrimitiveMonteCarloAction 3000"),
+            Box::new(|state| primitive_montecarlo_action(state, 3000)),
         ),
         Ai(
-            String::from("IterativeDeepningAction 1"),
-            Box::new(|state| iterative_deepning_action(state, 1) as usize),
+            String::from("PrimitiveMonteCarloAction 30"),
+            Box::new(|state| primitive_montecarlo_action(state, 30)),
         ),
     ];
     test_first_player_win_rate(ais, 100);

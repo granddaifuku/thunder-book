@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 use std::sync::Mutex;
 use std::time::Instant;
 
-use montecarlo::primitive_montecarlo_action;
+use montecarlo::mcts_action;
 use once_cell::sync::Lazy;
 use rand::Rng;
 
@@ -503,8 +503,143 @@ mod iterative_deepning {
     }
 }
 
+#[allow(dead_code)]
 mod montecarlo {
+    const C: f32 = 1.0;
+    const EXPAND_THRESHOLD: usize = 10;
     use super::{random_action, AlternateMazeState, WinningStatus};
+
+    #[derive(Debug, Clone)]
+    struct Node {
+        state: AlternateMazeState,
+        w: f32,
+        n: usize,
+        child_nodes: Vec<Node>,
+    }
+
+    impl Node {
+        fn new(state: AlternateMazeState) -> Self {
+            Self {
+                state: state.clone(),
+                w: 0.0,
+                n: 0,
+                child_nodes: Vec::new(),
+            }
+        }
+
+        fn next_child_node(&mut self) -> usize {
+            for (i, child_node) in self.child_nodes.iter().enumerate() {
+                if child_node.n == 0 {
+                    return i;
+                }
+            }
+            let mut t = 0.0;
+            for child_node in &self.child_nodes {
+                t += child_node.n as f32;
+            }
+            let mut best_value = f32::MIN;
+            let mut best_action_index = -1;
+            for i in 0..self.child_nodes.len() {
+                let child_node = &self.child_nodes[i];
+                let ucb1_value = 1.0 - child_node.w / child_node.n as f32
+                    + C * (2.0 * t.ln() / child_node.n as f32).sqrt();
+                if ucb1_value > best_value {
+                    best_value = ucb1_value;
+                    best_action_index = i as i32;
+                }
+            }
+
+            best_action_index as usize
+        }
+
+        fn expand(&mut self) {
+            let legal_actions = self.state.legal_actions();
+            self.child_nodes.clear();
+            for act in legal_actions {
+                self.child_nodes.push(Node::new(self.state.clone()));
+                self.child_nodes.last_mut().unwrap().state.advance(act);
+            }
+        }
+
+        fn evaluate(&mut self) -> f32 {
+            if self.state.is_done() {
+                let mut value = 0.5;
+                match self.state.get_winning_status() {
+                    WinningStatus::Win => value = 1.0,
+                    WinningStatus::Lose => value = 0.0,
+                    _ => {}
+                }
+                self.w += value;
+                self.n += 1;
+                return value;
+            }
+
+            if self.child_nodes.is_empty() {
+                let mut state_copy = self.state.clone();
+                let value = playout(&mut state_copy);
+                self.w += value;
+                self.n += 1;
+                if self.n == EXPAND_THRESHOLD {
+                    self.expand();
+                }
+                value
+            } else {
+                let next_child_node_index = self.next_child_node();
+                let value = 1.0
+                    - self
+                        .child_nodes
+                        .get_mut(next_child_node_index)
+                        .unwrap()
+                        .evaluate();
+                self.w += value;
+                self.n += 1;
+
+                value
+            }
+        }
+
+        fn print_tree(&self, depth: usize) {
+            for (i, child_node) in self.child_nodes.iter().enumerate() {
+                print!("{}", String::from("__").repeat(depth));
+                println!(" {} ({})", i, child_node.n);
+                if !child_node.child_nodes.is_empty() {
+                    child_node.print_tree(depth + 1);
+                }
+            }
+        }
+    }
+
+    pub fn mcts_action(state: &AlternateMazeState, playout_number: usize, is_print: bool) -> usize {
+        use std::sync::atomic::AtomicBool;
+        let mut root_node = Node::new(state.clone());
+        root_node.expand();
+        for _ in 0..playout_number {
+            root_node.evaluate();
+        }
+        let legal_actions = state.legal_actions();
+        let mut best_action_searched_number = -1;
+        let mut best_action_index = -1;
+        for i in 0..legal_actions.len() {
+            let n = root_node.child_nodes[i].n as i32;
+            if n > best_action_searched_number {
+                best_action_index = i as i32;
+                best_action_searched_number = n;
+            }
+        }
+        {
+            static mut CALLED_COUNT: AtomicBool = AtomicBool::new(false);
+            unsafe {
+                let called_count = CALLED_COUNT.get_mut();
+                if is_print && !*called_count {
+                    root_node.print_tree(0);
+                }
+                *called_count = true;
+            }
+        }
+
+        legal_actions[best_action_index as usize]
+    }
+
     pub fn primitive_montecarlo_action(state: &AlternateMazeState, playout_number: usize) -> usize {
         let legal_actions = state.legal_actions();
         let mut values = vec![0.0; legal_actions.len()];
@@ -544,15 +679,6 @@ mod montecarlo {
 }
 
 fn main() {
-    let ais = vec![
-        Ai(
-            String::from("PrimitiveMonteCarloAction 3000"),
-            Box::new(|state| primitive_montecarlo_action(state, 3000)),
-        ),
-        Ai(
-            String::from("PrimitiveMonteCarloAction 30"),
-            Box::new(|state| primitive_montecarlo_action(state, 30)),
-        ),
-    ];
-    test_first_player_win_rate(ais, 100);
+    let state = AlternateMazeState::new(0);
+    mcts_action(&state, 3000, true);
 }

@@ -2,9 +2,10 @@ use std::cmp::Ordering;
 use std::sync::Mutex;
 use std::time::Instant;
 
-use montecarlo::mcts_action;
+use iterative_deepening::iterative_deepening_action;
 use once_cell::sync::Lazy;
 use rand::Rng;
+use thunder::thunder_search_action_with_time_threshold;
 
 const H: usize = 5;
 const W: usize = 5;
@@ -151,6 +152,15 @@ impl AlternateMazeState {
 
     fn get_score(&self) -> i32 {
         self.characters[0].game_score - self.characters[1].game_score
+    }
+
+    fn get_score_rate(&self) -> f32 {
+        if self.characters[0].game_score + self.characters[1].game_score == 0 {
+            0.0
+        } else {
+            self.characters[0].game_score as f32
+                / (self.characters[0].game_score + self.characters[1].game_score) as f32
+        }
     }
 
     fn get_first_player_score_for_winning_rate(&self) -> f32 {
@@ -428,7 +438,7 @@ mod alphabeta {
 }
 
 #[allow(dead_code)]
-mod iterative_deepning {
+mod iterative_deepening {
     use super::{AlternateMazeState, TimeKeeper};
     fn alphabeta_score(
         state: &AlternateMazeState,
@@ -487,7 +497,7 @@ mod iterative_deepning {
         best_action
     }
 
-    pub fn iterative_deepning_action(state: &AlternateMazeState, threshold: u128) -> i32 {
+    pub fn iterative_deepening_action(state: &AlternateMazeState, threshold: u128) -> usize {
         let time_keeper = TimeKeeper::new(threshold);
         let mut best_action = -1;
         let mut depth = 1;
@@ -499,7 +509,7 @@ mod iterative_deepning {
             best_action = act;
             depth += 1;
         }
-        best_action
+        best_action as usize
     }
 }
 
@@ -507,7 +517,8 @@ mod iterative_deepning {
 mod montecarlo {
     const C: f32 = 1.0;
     const EXPAND_THRESHOLD: usize = 10;
-    use super::{random_action, AlternateMazeState, WinningStatus};
+
+    use super::{random_action, AlternateMazeState, TimeKeeper, WinningStatus};
 
     #[derive(Debug, Clone)]
     struct Node {
@@ -640,6 +651,30 @@ mod montecarlo {
         legal_actions[best_action_index as usize]
     }
 
+    pub fn mcts_action_with_time_threshold(state: &AlternateMazeState, threshold: u128) -> usize {
+        let mut root_node = Node::new(state.clone());
+        root_node.expand();
+        let time_keeper = TimeKeeper::new(threshold);
+        loop {
+            if time_keeper.is_time_over() {
+                break;
+            }
+            root_node.evaluate();
+        }
+        let legal_actions = state.legal_actions();
+        let mut best_action_searched_number = -1;
+        let mut best_action_index = -1;
+        for i in 0..legal_actions.len() {
+            let n = root_node.child_nodes[i].n as i32;
+            if n > best_action_searched_number {
+                best_action_index = i as i32;
+                best_action_searched_number = n;
+            }
+        }
+
+        legal_actions[best_action_index as usize]
+    }
+
     pub fn primitive_montecarlo_action(state: &AlternateMazeState, playout_number: usize) -> usize {
         let legal_actions = state.legal_actions();
         let mut values = vec![0.0; legal_actions.len()];
@@ -678,7 +713,149 @@ mod montecarlo {
     }
 }
 
+#[allow(dead_code)]
+mod thunder {
+    use super::{AlternateMazeState, TimeKeeper, WinningStatus};
+    #[derive(Debug, Clone)]
+    struct Node {
+        state: AlternateMazeState,
+        w: f32,
+        n: usize,
+        child_nodes: Vec<Node>,
+    }
+
+    impl Node {
+        fn new(state: AlternateMazeState) -> Self {
+            Self {
+                state: state.clone(),
+                w: 0.0,
+                n: 0,
+                child_nodes: Vec::new(),
+            }
+        }
+
+        fn next_child_node(&mut self) -> usize {
+            for (i, child_node) in self.child_nodes.iter().enumerate() {
+                if child_node.n == 0 {
+                    return i;
+                }
+            }
+            let mut best_value = f32::MIN;
+            let mut best_action_index = -1;
+            for i in 0..self.child_nodes.len() {
+                let child_node = &self.child_nodes[i];
+                let thunder_value = 1.0 - child_node.w / child_node.n as f32;
+                if thunder_value > best_value {
+                    best_value = thunder_value;
+                    best_action_index = i as i32;
+                }
+            }
+
+            best_action_index as usize
+        }
+
+        fn expand(&mut self) {
+            let legal_actions = self.state.legal_actions();
+            self.child_nodes.clear();
+            for act in legal_actions {
+                self.child_nodes.push(Node::new(self.state.clone()));
+                self.child_nodes.last_mut().unwrap().state.advance(act);
+            }
+        }
+
+        fn evaluate(&mut self) -> f32 {
+            if self.state.is_done() {
+                let mut value = 0.5;
+                match self.state.get_winning_status() {
+                    WinningStatus::Win => value = 1.0,
+                    WinningStatus::Lose => value = 0.0,
+                    _ => {}
+                }
+                self.w += value;
+                self.n += 1;
+                return value;
+            }
+            if self.child_nodes.is_empty() {
+                let value = self.state.get_score_rate();
+                self.w += value;
+                self.n += 1;
+                self.expand();
+
+                value
+            } else {
+                let next_child_node_index = self.next_child_node();
+                let value = 1.0
+                    - self
+                        .child_nodes
+                        .get_mut(next_child_node_index)
+                        .unwrap()
+                        .evaluate();
+                self.w += value;
+                self.n += 1;
+
+                value
+            }
+        }
+    }
+
+    pub fn thunder_search_action(state: &AlternateMazeState, playout_number: usize) -> usize {
+        let mut root_node = Node::new(state.clone());
+        root_node.expand();
+        for _ in 0..playout_number {
+            root_node.evaluate();
+        }
+        let legal_actions = state.legal_actions();
+        let mut best_action_searched_number = -1;
+        let mut best_action_index = -1;
+        for i in 0..legal_actions.len() {
+            let n = root_node.child_nodes[i].n as i32;
+            if n > best_action_searched_number {
+                best_action_index = i as i32;
+                best_action_searched_number = n;
+            }
+        }
+
+        legal_actions[best_action_index as usize]
+    }
+
+    pub fn thunder_search_action_with_time_threshold(
+        state: &AlternateMazeState,
+        threshold: u128,
+    ) -> usize {
+        let mut root_node = Node::new(state.clone());
+        root_node.expand();
+        let time_keeper = TimeKeeper::new(threshold);
+        loop {
+            if time_keeper.is_time_over() {
+                break;
+            }
+            root_node.evaluate();
+        }
+        let legal_actions = state.legal_actions();
+        let mut best_action_searched_number = -1;
+        let mut best_action_index = -1;
+        for i in 0..legal_actions.len() {
+            let n = root_node.child_nodes[i].n as i32;
+            if n > best_action_searched_number {
+                best_action_index = i as i32;
+                best_action_searched_number = n;
+            }
+        }
+
+        legal_actions[best_action_index as usize]
+    }
+}
+
 fn main() {
-    let state = AlternateMazeState::new(0);
-    mcts_action(&state, 3000, true);
+    let ais = vec![
+        Ai(
+            String::from("thunderSearchActionWithTimeThreshold 1ms"),
+            Box::new(|state| thunder_search_action_with_time_threshold(state, 1)),
+        ),
+        Ai(
+            String::from("iterativeDeepening 1ms"),
+            Box::new(|state| iterative_deepening_action(state, 1)),
+        ),
+    ];
+    test_first_player_win_rate(ais, 100);
 }

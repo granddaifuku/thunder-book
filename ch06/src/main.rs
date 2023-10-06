@@ -3,6 +3,7 @@ use std::{cmp::Ordering, sync::Mutex};
 
 use once_cell::sync::Lazy;
 
+use alternate_motecarlo::mcts_action;
 use montecarlo::primitive_montecarlo_action;
 
 const H: usize = 5;
@@ -207,11 +208,76 @@ impl SimultaneousMazeState {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct AlternateMazeState {
+    points: Vec<Vec<usize>>,
+    turn: usize,
+    characters: Vec<Character>,
+}
+
+impl AlternateMazeState {
+    const END_TURN: usize = END_TURN * 2;
+    #[allow(non_upper_case_globals)]
+    const dx: [i32; 4] = [1, -1, 0, 0];
+    #[allow(non_upper_case_globals)]
+    const dy: [i32; 4] = [0, 0, 1, -1];
+
+    fn new(base_state: &SimultaneousMazeState, player_id: usize) -> Self {
+        Self {
+            points: base_state.points.clone(),
+            turn: base_state.turn * 2,
+            characters: if player_id == 0 {
+                base_state.characters.clone()
+            } else {
+                vec![base_state.characters[1], base_state.characters[0]]
+            },
+        }
+    }
+
+    const fn is_done(&self) -> bool {
+        self.turn == Self::END_TURN
+    }
+
+    fn advance(&mut self, action: usize) {
+        let character = self.characters.get_mut(0).unwrap();
+        character.advance(Self::dx[action], Self::dy[action], &self.points);
+        self.points[character.x as usize][character.y as usize] = 0;
+        self.turn += 1;
+        self.characters.swap(0, 1);
+    }
+
+    fn legal_actions(&self) -> Vec<usize> {
+        let mut actions = Vec::new();
+        let character = &self.characters[0];
+        for i in 0..4 {
+            let nx = character.x + Self::dx[i];
+            let ny = character.y + Self::dy[i];
+            if nx >= 0 && nx < H as i32 && ny >= 0 && ny < W as i32 {
+                actions.push(i);
+            }
+        }
+
+        actions
+    }
+
+    fn get_winning_status(&self) -> WinningStatus {
+        if self.is_done() {
+            let score_0 = self.characters[0].game_score;
+            let score_1 = self.characters[1].game_score;
+            match score_0.cmp(&score_1) {
+                Ordering::Greater => WinningStatus::First,
+                Ordering::Less => WinningStatus::Second,
+                Ordering::Equal => WinningStatus::Draw,
+            }
+        } else {
+            WinningStatus::None
+        }
+    }
+}
+
 #[allow(dead_code)]
 mod montecarlo {
-    use crate::get_random;
-
-    use super::{random_action, SimultaneousMazeState, WinningStatus};
+    use super::{get_random, random_action, SimultaneousMazeState, WinningStatus};
 
     // The view from the player0
     fn playout(state: &mut SimultaneousMazeState) -> f32 {
@@ -262,6 +328,143 @@ mod montecarlo {
         }
 
         my_legal_actions[best_action_index as usize]
+    }
+}
+
+mod alternate_motecarlo {
+    use super::{get_random, AlternateMazeState, SimultaneousMazeState, WinningStatus};
+
+    const C: f32 = 1.0;
+    const EXPAND_THRESHOLD: usize = 10;
+
+    fn random_action(state: &AlternateMazeState) -> usize {
+        let legal_actions = state.legal_actions();
+        legal_actions[get_random(legal_actions.len())]
+    }
+
+    fn playout(state: &mut AlternateMazeState) -> f32 {
+        match state.get_winning_status() {
+            WinningStatus::First => 1.0,
+            WinningStatus::Second => 0.0,
+            WinningStatus::Draw => 0.5,
+            WinningStatus::None => {
+                state.advance(random_action(state));
+                1.0 - playout(state)
+            }
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    struct Node {
+        state: AlternateMazeState,
+        w: f32,
+        n: usize,
+        child_nodes: Vec<Node>,
+    }
+
+    impl Node {
+        fn new(state: &AlternateMazeState) -> Self {
+            Self {
+                state: state.clone(),
+                w: 0.0,
+                n: 0,
+                child_nodes: Vec::new(),
+            }
+        }
+
+        fn evaluate(&mut self) -> f32 {
+            if self.state.is_done() {
+                let mut value = 0.5;
+                match self.state.get_winning_status() {
+                    WinningStatus::First => value = 1.0,
+                    WinningStatus::Second => value = 0.0,
+                    _ => {}
+                }
+                self.w += value;
+                self.n += 1;
+                return value;
+            }
+            if self.child_nodes.is_empty() {
+                let mut state_copy = self.state.clone();
+                let value = playout(&mut state_copy);
+                self.w += value;
+                self.n += 1;
+                if self.n == EXPAND_THRESHOLD {
+                    self.expand();
+                }
+                value
+            } else {
+                let next_child_node_index = self.next_child_node();
+                let value = 1.0
+                    - self
+                        .child_nodes
+                        .get_mut(next_child_node_index)
+                        .unwrap()
+                        .evaluate();
+                self.w += value;
+                self.n += 1;
+                value
+            }
+        }
+
+        fn expand(&mut self) {
+            let legal_actions = self.state.legal_actions();
+            self.child_nodes.clear();
+            for act in legal_actions {
+                self.child_nodes.push(Node::new(&self.state));
+                self.child_nodes.last_mut().unwrap().state.advance(act);
+            }
+        }
+
+        fn next_child_node(&mut self) -> usize {
+            let mut t = 0.0;
+            for (i, child_node) in self.child_nodes.iter().enumerate() {
+                if child_node.n == 0 {
+                    return i;
+                }
+                t += child_node.n as f32;
+            }
+
+            let mut best_value = f32::MIN;
+            let mut best_action_index = -1;
+            for i in 0..self.child_nodes.len() {
+                let child_node = &self.child_nodes[i];
+                let ucb1_value = 1.0 - child_node.w / child_node.n as f32
+                    + C * (2.0 * t.ln() / child_node.n as f32).sqrt();
+                if ucb1_value > best_value {
+                    best_value = ucb1_value;
+                    best_action_index = i as i32;
+                }
+            }
+
+            best_action_index as usize
+        }
+    }
+
+    pub fn mcts_action(
+        base_state: &SimultaneousMazeState,
+        player_id: usize,
+        playout_number: usize,
+    ) -> usize {
+        let state = AlternateMazeState::new(base_state, player_id);
+        let mut root_node = Node::new(&state);
+        root_node.expand();
+        for _ in 0..playout_number {
+            root_node.evaluate();
+        }
+        let legal_actions = state.legal_actions();
+
+        let mut best_action_searched_number = -1;
+        let mut best_action_index = -1;
+        for i in 0..legal_actions.len() {
+            let n = root_node.child_nodes[i].n as i32;
+            if n > best_action_searched_number {
+                best_action_index = i as i32;
+                best_action_searched_number = n;
+            }
+        }
+
+        legal_actions[best_action_index as usize]
     }
 }
 
@@ -318,12 +521,12 @@ fn test_first_player_win_rate(ais: Vec<Ai>, game_number: usize) {
 fn main() {
     let ais = vec![
         Ai(
-            String::from("primitiveMotecarloAction"),
-            Box::new(|state| primitive_montecarlo_action(state, 0, 1000)),
+            String::from("mctsAction"),
+            Box::new(|state| mcts_action(state, 0, 1000)),
         ),
         Ai(
-            String::from("randomAction"),
-            Box::new(|state| random_action(state, 1)),
+            String::from("primitiveMotecarloAction"),
+            Box::new(|state| primitive_montecarlo_action(state, 1, 1000)),
         ),
     ];
 

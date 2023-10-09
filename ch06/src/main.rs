@@ -4,7 +4,7 @@ use std::{cmp::Ordering, sync::Mutex};
 use once_cell::sync::Lazy;
 
 use alternate_motecarlo::mcts_action;
-use montecarlo::primitive_montecarlo_action;
+use montecarlo::duct_action;
 
 const H: usize = 5;
 const W: usize = 5;
@@ -279,6 +279,9 @@ impl AlternateMazeState {
 mod montecarlo {
     use super::{get_random, random_action, SimultaneousMazeState, WinningStatus};
 
+    const C: f32 = 1.0;
+    const EXPAND_THRESHOLD: usize = 5;
+
     // The view from the player0
     fn playout(state: &mut SimultaneousMazeState) -> f32 {
         match state.get_winning_status() {
@@ -328,6 +331,171 @@ mod montecarlo {
         }
 
         my_legal_actions[best_action_index as usize]
+    }
+
+    pub fn duct_action(
+        state: &SimultaneousMazeState,
+        player_id: usize,
+        playout_number: usize,
+    ) -> usize {
+        let mut root_node = Node::new(state);
+        root_node.expand();
+        for _ in 0..playout_number {
+            root_node.evaluate();
+        }
+        let legal_actions = state.legal_actions(player_id);
+        let i_size = root_node.child_nodeses.len();
+        let j_size = root_node.child_nodeses[0].len();
+
+        if player_id == 0 {
+            let mut best_action_searched_number = -1;
+            let mut best_action_index = -1;
+            for i in 0..i_size {
+                let mut n = 0;
+                for j in 0..j_size {
+                    n += root_node.child_nodeses[i][j].n as i32;
+                }
+                if n > best_action_searched_number {
+                    best_action_index = i as i32;
+                    best_action_searched_number = n;
+                }
+            }
+
+            legal_actions[best_action_index as usize]
+        } else {
+            let mut best_action_searched_number = -1;
+            let mut best_j = -1;
+            for j in 0..j_size {
+                let mut n = 0;
+                for i in 0..i_size {
+                    n += root_node.child_nodeses[i][j].n as i32;
+                }
+                if n > best_action_searched_number {
+                    best_j = j as i32;
+                    best_action_searched_number = n;
+                }
+            }
+
+            legal_actions[best_j as usize]
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    struct Node {
+        state: SimultaneousMazeState,
+        w: f32,
+        n: usize,
+        child_nodeses: Vec<Vec<Node>>,
+    }
+
+    impl Node {
+        fn new(state: &SimultaneousMazeState) -> Self {
+            Self {
+                state: state.clone(),
+                w: 0.0,
+                n: 0,
+                child_nodeses: Vec::new(),
+            }
+        }
+
+        fn evaluate(&mut self) -> f32 {
+            if self.state.is_done() {
+                let mut value = 0.5;
+                match self.state.get_winning_status() {
+                    WinningStatus::First => value = 1.0,
+                    WinningStatus::Second => value = 0.0,
+                    _ => {}
+                }
+                self.w += value;
+                self.n += 1;
+                return value;
+            }
+            if self.child_nodeses.is_empty() {
+                let mut state_copy = self.state.clone();
+                let value = playout(&mut state_copy);
+                self.w += value;
+                self.n += 1;
+
+                if self.n == EXPAND_THRESHOLD {
+                    self.expand();
+                }
+
+                value
+            } else {
+                let (l_index, r_index) = self.next_child_node();
+                let value = self.child_nodeses[l_index][r_index].evaluate();
+                self.w += value;
+                self.n += 1;
+                value
+            }
+        }
+
+        fn expand(&mut self) {
+            let legal_action0 = self.state.legal_actions(0);
+            let legal_action1 = self.state.legal_actions(1);
+            self.child_nodeses.clear();
+            for action0 in &legal_action0 {
+                self.child_nodeses.push(Vec::new());
+                let target_nodes = self.child_nodeses.last_mut().unwrap();
+                for action1 in &legal_action1 {
+                    target_nodes.push(Node::new(&self.state));
+                    let target_node = target_nodes.last_mut().unwrap();
+                    target_node.state.advance(*action0, *action1);
+                }
+            }
+        }
+
+        fn next_child_node(&mut self) -> (usize, usize) {
+            for (i, child_nodes) in self.child_nodeses.iter().enumerate() {
+                for (j, child_node) in child_nodes.iter().enumerate() {
+                    if child_node.n == 0 {
+                        return (i, j);
+                    }
+                }
+            }
+            let mut t = 0.0;
+            for child_nodes in &self.child_nodeses {
+                for child_node in child_nodes {
+                    t += child_node.n as f32;
+                }
+            }
+
+            let mut best_is = (-1, -1);
+            let mut best_value = f32::MIN;
+            // player 0
+            for (i, child_nodes) in self.child_nodeses.iter().enumerate() {
+                let mut w = 0.0;
+                let mut n = 0;
+                for child_node in child_nodes {
+                    w += child_node.w;
+                    n += child_node.n;
+                }
+                let ucb1_value = w / n as f32 + C * (2.0 * t.ln() / n as f32).sqrt();
+                if ucb1_value > best_value {
+                    best_is.0 = i as i32;
+                    best_value = ucb1_value;
+                }
+            }
+
+            // player1
+            best_value = f32::MIN;
+            for j in 0..self.child_nodeses[0].len() {
+                let mut w = 0.0;
+                let mut n = 0;
+                for i in 0..self.child_nodeses.len() {
+                    let child_node = &self.child_nodeses[i][j];
+                    w += child_node.w;
+                    n += child_node.n;
+                }
+                let ucb1_value = 1.0 - w / n as f32 + C * (2.0 * t.ln() / n as f32).sqrt();
+                if ucb1_value > best_value {
+                    best_is.1 = j as i32;
+                    best_value = ucb1_value;
+                }
+            }
+
+            (best_is.0 as usize, best_is.1 as usize)
+        }
     }
 }
 
@@ -521,12 +689,12 @@ fn test_first_player_win_rate(ais: Vec<Ai>, game_number: usize) {
 fn main() {
     let ais = vec![
         Ai(
-            String::from("mctsAction"),
-            Box::new(|state| mcts_action(state, 0, 1000)),
+            String::from("ductAction"),
+            Box::new(|state| duct_action(state, 0, 1000)),
         ),
         Ai(
-            String::from("primitiveMotecarloAction"),
-            Box::new(|state| primitive_montecarlo_action(state, 1, 1000)),
+            String::from("mctsAction"),
+            Box::new(|state| mcts_action(state, 1, 1000)),
         ),
     ];
 

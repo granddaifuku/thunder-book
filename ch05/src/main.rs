@@ -531,7 +531,7 @@ mod montecarlo {
     impl Node {
         fn new(state: AlternateMazeState) -> Self {
             Self {
-                state: state.clone(),
+                state: state,
                 w: 0.0,
                 n: 0,
                 child_nodes: Vec::new(),

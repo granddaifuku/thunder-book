@@ -1,4 +1,5 @@
 use std::sync::Mutex;
+use std::time::Instant;
 
 use once_cell::sync::Lazy;
 use rand::{rngs::StdRng, Rng, SeedableRng};
@@ -32,4 +33,22 @@ pub fn init_random_generator(seed: u64) {
 
 pub fn get_random(limit: usize) -> usize {
     GENERATOR.lock().unwrap().gen_range(limit)
+}
+
+pub struct TimeKeeper {
+    start_time: Instant,
+    threshold: u128,
+}
+
+impl TimeKeeper {
+    pub fn new(threshold: u128) -> TimeKeeper {
+        TimeKeeper {
+            start_time: Instant::now(),
+            threshold,
+        }
+    }
+
+    pub fn is_time_over(&self) -> bool {
+        (Instant::now() - self.start_time).as_millis() >= self.threshold
+    }
 }

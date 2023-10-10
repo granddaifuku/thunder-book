@@ -1,7 +1,6 @@
 use std::cmp::Ordering;
-use std::time::Instant;
 
-use common::{get_random, init_random_generator};
+use common::{get_random, init_random_generator, TimeKeeper};
 
 use iterative_deepening::iterative_deepening_action;
 use thunder::thunder_search_action_with_time_threshold;
@@ -9,26 +8,6 @@ use thunder::thunder_search_action_with_time_threshold;
 const H: usize = 5;
 const W: usize = 5;
 const END_TURN: usize = 10;
-
-#[allow(dead_code)]
-struct TimeKeeper {
-    start_time: Instant,
-    threshold: u128,
-}
-
-#[allow(dead_code)]
-impl TimeKeeper {
-    pub fn new(threshold: u128) -> TimeKeeper {
-        TimeKeeper {
-            start_time: Instant::now(),
-            threshold,
-        }
-    }
-
-    pub fn is_time_over(&self) -> bool {
-        (Instant::now() - self.start_time).as_millis() >= self.threshold
-    }
-}
 
 struct Ai(String, Box<dyn Fn(&AlternateMazeState) -> usize>);
 

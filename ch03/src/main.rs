@@ -1,30 +1,11 @@
-use common::{get_random, init_random_generator};
+use common::{get_random, init_random_generator, TimeKeeper};
 
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
-use std::time::Instant;
 
 const H: i32 = 30;
 const W: i32 = 30;
 const END_TURN: i32 = 100;
-
-struct TimeKeeper {
-    start_time: Instant,
-    threshold: u128,
-}
-
-impl TimeKeeper {
-    pub fn new(threshold: u128) -> TimeKeeper {
-        TimeKeeper {
-            start_time: Instant::now(),
-            threshold,
-        }
-    }
-
-    pub fn is_time_over(&self) -> bool {
-        (Instant::now() - self.start_time).as_millis() >= self.threshold
-    }
-}
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct Coord {

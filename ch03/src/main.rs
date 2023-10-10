@@ -75,7 +75,7 @@ impl MazeState {
 
         for i in 0..W {
             for j in 0..H {
-                if i as i32 == x && j as i32 == y {
+                if i == x && j == y {
                     continue;
                 }
                 points[i as usize][j as usize] = get_random(10) as i32;

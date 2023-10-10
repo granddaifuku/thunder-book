@@ -1,10 +1,9 @@
 use std::cmp::Ordering;
-use std::sync::Mutex;
 use std::time::Instant;
 
+use common::{get_random, init_random_generator};
+
 use iterative_deepening::iterative_deepening_action;
-use once_cell::sync::Lazy;
-use rand::Rng;
 use thunder::thunder_search_action_with_time_threshold;
 
 const H: usize = 5;
@@ -32,13 +31,6 @@ impl TimeKeeper {
 }
 
 struct Ai(String, Box<dyn Fn(&AlternateMazeState) -> usize>);
-
-static RNG: Lazy<Mutex<rand::rngs::StdRng>> =
-    Lazy::new(|| Mutex::new(rand::SeedableRng::seed_from_u64(0)));
-
-fn get_random(limit: usize) -> usize {
-    RNG.lock().unwrap().gen_range(0..limit)
-}
 
 #[derive(Debug)]
 enum WinningStatus {
@@ -78,15 +70,14 @@ impl AlternateMazeState {
     #[allow(non_upper_case_globals)]
     const dy: [i32; 4] = [0, 0, 1, -1];
 
-    fn new(seed: u64) -> AlternateMazeState {
-        let mut rng: rand::rngs::StdRng = rand::SeedableRng::seed_from_u64(seed);
+    fn new() -> AlternateMazeState {
         let mut points = vec![vec![0; W]; H];
         for i in 0..H {
             for j in 0..W {
                 if i == H / 2 && (j == W / 2 - 1 || j == W / 2 + 1) {
                     continue;
                 }
-                points[i][j] = rng.gen_range(0..10);
+                points[i][j] = get_random(10);
             }
         }
 
@@ -239,11 +230,12 @@ fn random_action(state: &AlternateMazeState) -> usize {
 
 #[allow(dead_code)]
 fn get_sample_states(game_number: usize) -> Vec<AlternateMazeState> {
-    let mut rng: rand::rngs::StdRng = rand::SeedableRng::seed_from_u64(0);
+    init_random_generator(0);
+
     let mut states = Vec::new();
     for _ in 0..game_number {
-        let mut state = AlternateMazeState::new(rng.gen());
-        let turn = rng.gen::<usize>() % END_TURN;
+        let mut state = AlternateMazeState::new();
+        let turn = get_random(usize::MAX) % END_TURN;
         for _ in 0..turn {
             state.advance(random_action(&state));
         }
@@ -274,7 +266,9 @@ fn calc_execution_speed(ai: &Ai, states: &Vec<AlternateMazeState>) {
 fn test_first_player_win_rate(ais: Vec<Ai>, game_number: usize) {
     let mut first_player_win_rate = 0.0;
     for i in 0..game_number {
-        let base_state = AlternateMazeState::new(i as u64);
+        init_random_generator(i as u64);
+
+        let base_state = AlternateMazeState::new();
         for j in 0..2 {
             let mut state = base_state.clone();
             let first_ai = &ais[j];
@@ -310,7 +304,9 @@ fn test_first_player_win_rate(ais: Vec<Ai>, game_number: usize) {
 
 #[allow(dead_code)]
 fn play_game() {
-    let mut state = AlternateMazeState::new(1);
+    init_random_generator(0);
+
+    let mut state = AlternateMazeState::new();
     state.to_string();
     while !state.is_done() {
         // Player 1
@@ -531,7 +527,7 @@ mod montecarlo {
     impl Node {
         fn new(state: AlternateMazeState) -> Self {
             Self {
-                state: state,
+                state,
                 w: 0.0,
                 n: 0,
                 child_nodes: Vec::new(),

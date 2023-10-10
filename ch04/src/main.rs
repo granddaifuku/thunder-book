@@ -1,14 +1,9 @@
-use once_cell::sync::Lazy;
-use rand::{self, Rng};
-use std::sync::Mutex;
+use common::{get_random, init_random_generator};
 
 const H: usize = 5;
 const W: usize = 5;
 const END_TURN: usize = 5;
 const CHARACTER_N: usize = 3;
-
-static RNG: Lazy<Mutex<rand::rngs::StdRng>> =
-    Lazy::new(|| Mutex::new(rand::SeedableRng::seed_from_u64(100)));
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 struct Coord {
@@ -41,7 +36,7 @@ impl AutoMoveMazeState {
         let mut points = vec![vec![0; H]; W];
         for i in 0..W {
             for j in 0..H {
-                points[i][j] = RNG.lock().unwrap().gen_range(0..10);
+                points[i][j] = get_random(10) as i32;
             }
         }
 
@@ -114,15 +109,15 @@ impl AutoMoveMazeState {
 
     fn init(&mut self) {
         for character in &mut self.characters {
-            character.x = RNG.lock().unwrap().gen_range(0..W) as i32;
-            character.y = RNG.lock().unwrap().gen_range(0..H) as i32;
+            character.x = get_random(W) as i32;
+            character.y = get_random(H) as i32;
         }
     }
 
     fn transition(&mut self) {
-        let character = &mut self.characters[RNG.lock().unwrap().gen_range(0..CHARACTER_N)];
-        character.x = RNG.lock().unwrap().gen_range(0..W) as i32;
-        character.y = RNG.lock().unwrap().gen_range(0..H) as i32;
+        let character = &mut self.characters[get_random(CHARACTER_N)];
+        character.x = get_random(W) as i32;
+        character.y = get_random(H) as i32;
     }
 
     #[allow(dead_code)]
@@ -157,8 +152,8 @@ impl AutoMoveMazeState {
 #[allow(dead_code)]
 fn random_action(state: &mut AutoMoveMazeState) {
     for character_id in 0..CHARACTER_N {
-        let x = RNG.lock().unwrap().gen_range(0..W) as i32;
-        let y = RNG.lock().unwrap().gen_range(0..H) as i32;
+        let x = get_random(W) as i32;
+        let y = get_random(H) as i32;
         state.set_character(character_id, x, y);
     }
 }
@@ -195,8 +190,7 @@ fn simulated_annealing(
         let next_score = next_state.get_score(false);
         let temp = start_temp + (end_temp - start_temp) * (i as f64 / number as f64);
         let prob = f64::exp((next_score - now_score) as f64 / temp);
-        let is_force_next =
-            prob > RNG.lock().unwrap().gen_range(0..usize::MAX) as f64 / usize::MAX as f64;
+        let is_force_next = prob > get_random(usize::MAX) as f64 / usize::MAX as f64;
         if next_score > now_score || is_force_next {
             now_score = next_score;
             *state = next_state.clone();
@@ -222,7 +216,8 @@ fn test_ai_score(game_number: usize) {
     let simulate_number = 10000;
     let mut hill_climb_score_mean = 0;
     let mut annealing_score_mean = 0;
-    for _ in 0..game_number {
+    for i in 0..game_number {
+        init_random_generator(i as u64);
         let mut hill_climb_state = AutoMoveMazeState::new();
         let mut annealing_state = hill_climb_state.clone();
         hill_climb(&mut hill_climb_state, simulate_number);

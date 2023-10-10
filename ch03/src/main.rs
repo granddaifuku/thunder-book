@@ -1,30 +1,11 @@
-use rand::Rng;
+use common::{get_random, init_random_generator, TimeKeeper};
 
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
-use std::time::Instant;
 
 const H: i32 = 30;
 const W: i32 = 30;
 const END_TURN: i32 = 100;
-
-struct TimeKeeper {
-    start_time: Instant,
-    threshold: u128,
-}
-
-impl TimeKeeper {
-    pub fn new(threshold: u128) -> TimeKeeper {
-        TimeKeeper {
-            start_time: Instant::now(),
-            threshold,
-        }
-    }
-
-    pub fn is_time_over(&self) -> bool {
-        (Instant::now() - self.start_time).as_millis() >= self.threshold
-    }
-}
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct Coord {
@@ -68,9 +49,8 @@ impl MazeState {
     #[allow(non_upper_case_globals)]
     const dy: [i32; 4] = [0, 0, 1, -1];
     pub fn new() -> MazeState {
-        let mut rng = rand::thread_rng();
-        let x = rng.gen_range(0..W);
-        let y = rng.gen_range(0..H);
+        let x = get_random(W as usize) as i32;
+        let y = get_random(H as usize) as i32;
         let character = Coord::new(x, y);
         let mut points = vec![vec![0; H as usize]; W as usize];
 
@@ -79,7 +59,7 @@ impl MazeState {
                 if i == x && j == y {
                     continue;
                 }
-                points[i as usize][j as usize] = rng.gen_range(0..10);
+                points[i as usize][j as usize] = get_random(10) as i32;
             }
         }
 
@@ -148,10 +128,9 @@ impl MazeState {
 
 #[allow(dead_code)]
 fn random_action(state: &MazeState) -> usize {
-    let mut rng = rand::thread_rng();
     let acts = state.legal_action();
 
-    acts[rng.gen_range(0..acts.len())]
+    acts[get_random(acts.len())]
 }
 
 #[allow(dead_code)]
@@ -278,7 +257,8 @@ fn play_game() -> i32 {
 
 fn test_ai_score(game_number: usize) {
     let mut score_mean = 0.0;
-    for _ in 0..game_number {
+    for i in 0..game_number {
+        init_random_generator(i as u64);
         score_mean += play_game() as f64;
     }
     score_mean /= game_number as f64;

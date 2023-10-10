@@ -1,7 +1,6 @@
-use rand::Rng;
-use std::{cmp::Ordering, sync::Mutex};
+use std::cmp::Ordering;
 
-use once_cell::sync::Lazy;
+use common::{get_random, init_random_generator};
 
 use alternate_motecarlo::mcts_action;
 use montecarlo::duct_action;
@@ -11,37 +10,6 @@ const W: usize = 5;
 const END_TURN: usize = 20;
 #[allow(non_upper_case_globals)]
 const dstr: &[&str] = &["DOWN", "UP", "RIGHT", "LEFT"];
-
-#[derive(Debug)]
-struct RandomGenerator {
-    rng: rand::rngs::StdRng,
-}
-
-impl RandomGenerator {
-    fn new() -> Self {
-        Self {
-            rng: rand::SeedableRng::seed_from_u64(0),
-        }
-    }
-
-    fn set_rng(&mut self, seed: u64) {
-        self.rng = rand::SeedableRng::seed_from_u64(seed);
-    }
-
-    fn gen_range(&mut self, limit: usize) -> usize {
-        self.rng.gen_range(0..limit)
-    }
-}
-
-static GENERATOR: Lazy<Mutex<RandomGenerator>> = Lazy::new(|| Mutex::new(RandomGenerator::new()));
-
-fn init_random_generator(seed: u64) {
-    GENERATOR.lock().unwrap().set_rng(seed);
-}
-
-fn get_random(limit: usize) -> usize {
-    GENERATOR.lock().unwrap().gen_range(limit)
-}
 
 struct Ai(String, Box<dyn Fn(&SimultaneousMazeState) -> usize>);
 
